@@ -70,7 +70,7 @@ def collect_colin_data():
             and cs.end_event_id is null
             and cn.end_event_id is null
             and cn.corp_name_typ_cd in ('CO', 'NB')
-            and cos.op_state_typ_cd in ('ACT','HLD')
+            and cos.op_state_typ_cd in ('ACT','HLD','HIS')
         """)
     return cursor
 
@@ -92,7 +92,7 @@ def collect_lear_data() -> CursorResult:
         LEFT JOIN jurisdictions j on j.business_id = b.id
         WHERE legal_type in ({_get_stringified_list_for_sql('CONFLICT_LEGAL_TYPES')})
             and legal_type in ({_get_stringified_list_for_sql('MODERNIZED_LEGAL_TYPES')})
-            and state in ('ACTIVE')
+            and state in ('ACTIVE', 'HISTORICAL')
         """))
 
 
