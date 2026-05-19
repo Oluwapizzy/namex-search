@@ -102,7 +102,13 @@ def collect_namex_data() -> CursorResult:
     conn = namex_db.db.engine.connect()
     current_app.logger.debug("Collecting NameX data...")
     return conn.execute(text("""
-        SELECT r.nr_num, r.corp_num, r.state_cd as state, r.xpro_jurisdiction as jurisdiction,
+        SELECT r.nr_num,
+            COALESCE(n.corp_num, r.corp_num) as corp_num,
+            CASE
+                WHEN COALESCE(n.corp_num, r.corp_num) IS NOT NULL THEN 'CONSUMED'
+                ELSE r.state_cd
+            END as state,
+            r.xpro_jurisdiction as jurisdiction,
             r.submitted_date as start_date, r.submit_count,
             n.name, n.choice,
             CASE n.state
