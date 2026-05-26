@@ -32,72 +32,108 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# GCP Cloud Scheduler job definitions for namex-solr-api
+# GCP Cloud Scheduler + Cloud Run Job definitions for namex-solr-api sync endpoints.
 #
-# These jobs call the Solr sync endpoints on a recurring schedule.
-# Auth: Cloud Scheduler uses GCP OIDC (sa-api service account).
-#       The service account must have roles/run.invoker on the Cloud Run service.
+# Pattern (matches existing project convention e.g. namex-api-dev-heartbeat):
+#   Cloud Scheduler trigger → Cloud Run Job → curlimages/curl → endpoint
 #
-# To create or update jobs, run:
-#   gcloud scheduler jobs create http JOB_NAME \
-#     --project=PROJECT_ID \
-#     --location=northamerica-northeast1 \
-#     --schedule="SCHEDULE" \
-#     --time-zone="America/Vancouver" \
-#     --uri=SERVICE_URL/internal/solr/update/ENDPOINT \
-#     --http-method=GET \
-#     --oidc-service-account-email=SERVICE_ACCOUNT \
-#     --oidc-token-audience=SERVICE_URL
+# Setup steps per environment:
+#   1. Create the Cloud Run Job (Job section below) via GCP Console or gcloud.
+#   2. Create the Cloud Scheduler trigger pointing at the Cloud Run Job.
+#   3. Replace SERVICE_URL with the actual Cloud Run service URL:
+#      Format: https://{service-name}-{project-number}.northamerica-northeast1.run.app
+#      Dev example: https://namex-solr-api-dev-475224072965.northamerica-northeast1.run.app
 #
-# Replace SERVICE_URL with the Cloud Run service URL for the target environment.
-# Use `gcloud run services describe SERVICE_NAME --region=northamerica-northeast1` to get it.
+# Service accounts per environment:
+#   dev:     sa-job@a083gt-dev.iam.gserviceaccount.com
+#   test:    sa-job@a083gt-test.iam.gserviceaccount.com
+#   sandbox: sa-job@a083gt-integration.iam.gserviceaccount.com
+#   prod:    sa-job@a083gt-prod.iam.gserviceaccount.com
 
-jobs:
+# ---
+# JOB 1: Solr Sync — runs every 5 minutes
+# Cloud Run Job name: namex-solr-sync-{env}
+# Cloud Scheduler name: namex-solr-sync-{env}-scheduler-trigger
+# ---
+sync:
+  cloudRunJob:
+    image: curlimages/curl
+    command: ["sh", "-c"]
+    args: "curl -s -o /dev/null -w \"%{http_code}\" {SERVICE_URL}/internal/solr/update/sync"
+    taskCount: 1
+    maxRetries: 0
+    timeoutSeconds: 300
+    resources:
+      cpu: 1000m
+      memory: 512Mi
 
-  - name: namex-solr-sync
-    description: "Sync pending Solr updates from the DB every 5 minutes"
+  schedulerTrigger:
     schedule: "*/5 * * * *"
-    time-zone: "America/Vancouver"
-    http-method: GET
-    path: /internal/solr/update/sync
-    environments:
-      dev:
-        project: a083gt-dev
-        service-name: namex-solr-api-dev
-        service-account: sa-api@a083gt-dev.iam.gserviceaccount.com
-      test:
-        project: a083gt-test
-        service-name: namex-solr-api-test
-        service-account: sa-api@a083gt-test.iam.gserviceaccount.com
-      sandbox:
-        project: a083gt-integration
-        service-name: namex-solr-api-sandbox
-        service-account: sa-api@a083gt-integration.iam.gserviceaccount.com
-      prod:
-        project: a083gt-prod
-        service-name: namex-solr-api-prod
-        service-account: sa-api@a083gt-prod.iam.gserviceaccount.com
+    timezone: "America/Vancouver"
+    region: northamerica-northeast1
 
-  - name: namex-solr-sync-heartbeat
-    description: "Verify Solr follower replication health every 30 minutes"
-    schedule: "*/30 * * * *"
-    time-zone: "America/Vancouver"
-    http-method: GET
-    path: /internal/solr/update/sync/heartbeat
-    environments:
-      dev:
-        project: a083gt-dev
-        service-name: namex-solr-api-dev
-        service-account: sa-api@a083gt-dev.iam.gserviceaccount.com
-      test:
-        project: a083gt-test
-        service-name: namex-solr-api-test
-        service-account: sa-api@a083gt-test.iam.gserviceaccount.com
-      sandbox:
-        project: a083gt-integration
-        service-name: namex-solr-api-sandbox
-        service-account: sa-api@a083gt-integration.iam.gserviceaccount.com
-      prod:
-        project: a083gt-prod
-        service-name: namex-solr-api-prod
-        service-account: sa-api@a083gt-prod.iam.gserviceaccount.com
+  environments:
+    dev:
+      jobName: namex-solr-sync-dev
+      triggerName: namex-solr-sync-dev-scheduler-trigger
+      project: a083gt-dev
+      serviceAccount: sa-job@a083gt-dev.iam.gserviceaccount.com
+    test:
+      jobName: namex-solr-sync-test
+      triggerName: namex-solr-sync-test-scheduler-trigger
+      project: a083gt-test
+      serviceAccount: sa-job@a083gt-test.iam.gserviceaccount.com
+    sandbox:
+      jobName: namex-solr-sync-sandbox
+      triggerName: namex-solr-sync-sandbox-scheduler-trigger
+      project: a083gt-integration
+      serviceAccount: sa-job@a083gt-integration.iam.gserviceaccount.com
+    prod:
+      jobName: namex-solr-sync-prod
+      triggerName: namex-solr-sync-prod-scheduler-trigger
+      project: a083gt-prod
+      serviceAccount: sa-job@a083gt-prod.iam.gserviceaccount.com
+
+# ---
+# JOB 2: Solr Heartbeat — runs every 30 minutes
+# Cloud Run Job name: namex-solr-heartbeat-{env}
+# Cloud Scheduler name: namex-solr-heartbeat-{env}-scheduler-trigger
+# ---
+heartbeat:
+  cloudRunJob:
+    image: curlimages/curl
+    command: ["sh", "-c"]
+    args: "curl -s -o /dev/null -w \"%{http_code}\" {SERVICE_URL}/internal/solr/update/sync/heartbeat"
+    taskCount: 1
+    maxRetries: 0
+    timeoutSeconds: 300
+    resources:
+      cpu: 1000m
+      memory: 512Mi
+
+  schedulerTrigger:
+    schedule: "0,30 * * * *"
+    timezone: "America/Vancouver"
+    region: northamerica-northeast1
+
+  environments:
+    dev:
+      jobName: namex-solr-heartbeat-dev
+      triggerName: namex-solr-heartbeat-dev-scheduler-trigger
+      project: a083gt-dev
+      serviceAccount: sa-job@a083gt-dev.iam.gserviceaccount.com
+    test:
+      jobName: namex-solr-heartbeat-test
+      triggerName: namex-solr-heartbeat-test-scheduler-trigger
+      project: a083gt-test
+      serviceAccount: sa-job@a083gt-test.iam.gserviceaccount.com
+    sandbox:
+      jobName: namex-solr-heartbeat-sandbox
+      triggerName: namex-solr-heartbeat-sandbox-scheduler-trigger
+      project: a083gt-integration
+      serviceAccount: sa-job@a083gt-integration.iam.gserviceaccount.com
+    prod:
+      jobName: namex-solr-heartbeat-prod
+      triggerName: namex-solr-heartbeat-prod-scheduler-trigger
+      project: a083gt-prod
+      serviceAccount: sa-job@a083gt-prod.iam.gserviceaccount.com
