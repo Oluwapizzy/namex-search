@@ -78,6 +78,7 @@ sync:
       triggerName: namex-solr-sync-dev-scheduler-trigger
       project: a083gt-dev
       serviceAccount: sa-job@a083gt-dev.iam.gserviceaccount.com
+      serviceUrl: https://namex-solr-api-dev-475224072965.northamerica-northeast1.run.app
     test:
       jobName: namex-solr-sync-test
       triggerName: namex-solr-sync-test-scheduler-trigger
@@ -122,6 +123,7 @@ heartbeat:
       triggerName: namex-solr-heartbeat-dev-scheduler-trigger
       project: a083gt-dev
       serviceAccount: sa-job@a083gt-dev.iam.gserviceaccount.com
+      serviceUrl: https://namex-solr-api-dev-475224072965.northamerica-northeast1.run.app
     test:
       jobName: namex-solr-heartbeat-test
       triggerName: namex-solr-heartbeat-test-scheduler-trigger
