@@ -1,6 +1,13 @@
 name: NameX Solr Scheduler CD
 
 on:
+  push:
+    branches:
+      - main
+      - feature*
+      - hotfix*
+    paths:
+      - "namex-solr-api/jobs/**"
   workflow_dispatch:
     inputs:
       target:
@@ -12,147 +19,33 @@ on:
           - "test"
           - "sandbox"
           - "prod"
+      redeploy:
+        description: "Redeploy Application"
+        required: true
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
-  setup-schedulers:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  namex-solr-sync-cd:
+    uses: bcgov/bcregistry-sre/.github/workflows/backend-job-cd.yaml@main
+    with:
+      target: ${{ inputs.target }}
+      app_name: "namex-solr-sync"
+      working_directory: "./namex-solr-api/jobs/namex-solr-sync"
+      redeploy: ${{ inputs.redeploy }}
+    secrets:
+      WORKLOAD_IDENTIFY_POOLS_PROVIDER: ${{ secrets.WORKLOAD_IDENTIFY_POOLS_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Set environment variables
-        run: |
-          case "${{ inputs.target }}" in
-            dev)
-              echo "PROJECT=a083gt-dev" >> $GITHUB_ENV
-              echo "PROJECT_NUMBER=475224072965" >> $GITHUB_ENV
-              echo "SERVICE_URL=https://namex-solr-api-dev-475224072965.northamerica-northeast1.run.app" >> $GITHUB_ENV
-              echo "SERVICE_ACCOUNT=sa-job@a083gt-dev.iam.gserviceaccount.com" >> $GITHUB_ENV
-              ;;
-            test)
-              echo "PROJECT=a083gt-test" >> $GITHUB_ENV
-              echo "PROJECT_NUMBER=457237769279" >> $GITHUB_ENV
-              echo "SERVICE_URL=https://namex-solr-api-test-457237769279.northamerica-northeast1.run.app" >> $GITHUB_ENV
-              echo "SERVICE_ACCOUNT=sa-job@a083gt-test.iam.gserviceaccount.com" >> $GITHUB_ENV
-              ;;
-            sandbox)
-              echo "PROJECT=a083gt-integration" >> $GITHUB_ENV
-              echo "PROJECT_NUMBER=PLACEHOLDER" >> $GITHUB_ENV
-              echo "SERVICE_URL=PLACEHOLDER" >> $GITHUB_ENV
-              echo "SERVICE_ACCOUNT=sa-job@a083gt-integration.iam.gserviceaccount.com" >> $GITHUB_ENV
-              ;;
-            prod)
-              echo "PROJECT=a083gt-prod" >> $GITHUB_ENV
-              echo "PROJECT_NUMBER=PLACEHOLDER" >> $GITHUB_ENV
-              echo "SERVICE_URL=PLACEHOLDER" >> $GITHUB_ENV
-              echo "SERVICE_ACCOUNT=sa-job@a083gt-prod.iam.gserviceaccount.com" >> $GITHUB_ENV
-              ;;
-          esac
-          echo "ENV=${{ inputs.target }}" >> $GITHUB_ENV
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTIFY_POOLS_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      # --- Sync Job (every 5 minutes) ---
-
-      - name: Create or update Sync Cloud Run Job
-        run: |
-          gcloud run jobs create namex-solr-sync-${{ env.ENV }} \
-            --image=curlimages/curl \
-            --command=sh \
-            --args="-c,curl -s -o /dev/null -w '%{http_code}' ${{ env.SERVICE_URL }}/internal/solr/update/sync" \
-            --service-account=${{ env.SERVICE_ACCOUNT }} \
-            --region=northamerica-northeast1 \
-            --project=${{ env.PROJECT }} \
-            --execution-environment=gen2 \
-            --max-retries=0 \
-            --task-timeout=300s \
-            --cpu=1000m \
-            --memory=512Mi \
-          2>/dev/null || \
-          gcloud run jobs update namex-solr-sync-${{ env.ENV }} \
-            --image=curlimages/curl \
-            --command=sh \
-            --args="-c,curl -s -o /dev/null -w '%{http_code}' ${{ env.SERVICE_URL }}/internal/solr/update/sync" \
-            --service-account=${{ env.SERVICE_ACCOUNT }} \
-            --region=northamerica-northeast1 \
-            --project=${{ env.PROJECT }}
-
-      - name: Create or update Sync Scheduler Trigger
-        run: |
-          gcloud scheduler jobs create http namex-solr-sync-${{ env.ENV }}-scheduler-trigger \
-            --project=${{ env.PROJECT }} \
-            --location=northamerica-northeast1 \
-            --schedule="*/5 * * * *" \
-            --time-zone="America/Vancouver" \
-            --uri="https://northamerica-northeast1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_NUMBER }}/jobs/namex-solr-sync-${{ env.ENV }}:run" \
-            --message-body='{}' \
-            --http-method=POST \
-            --oauth-service-account-email=${{ env.SERVICE_ACCOUNT }} \
-            --oauth-token-scope=https://www.googleapis.com/auth/cloud-platform \
-          2>/dev/null || \
-          gcloud scheduler jobs update http namex-solr-sync-${{ env.ENV }}-scheduler-trigger \
-            --project=${{ env.PROJECT }} \
-            --location=northamerica-northeast1 \
-            --schedule="*/5 * * * *" \
-            --time-zone="America/Vancouver" \
-            --uri="https://northamerica-northeast1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_NUMBER }}/jobs/namex-solr-sync-${{ env.ENV }}:run" \
-            --message-body='{}' \
-            --http-method=POST \
-            --oauth-service-account-email=${{ env.SERVICE_ACCOUNT }} \
-            --oauth-token-scope=https://www.googleapis.com/auth/cloud-platform
-
-      # --- Heartbeat Job (every 30 minutes) ---
-
-      - name: Create or update Heartbeat Cloud Run Job
-        run: |
-          gcloud run jobs create namex-solr-heartbeat-${{ env.ENV }} \
-            --image=curlimages/curl \
-            --command=sh \
-            --args="-c,curl -s -o /dev/null -w '%{http_code}' ${{ env.SERVICE_URL }}/internal/solr/update/sync/heartbeat" \
-            --service-account=${{ env.SERVICE_ACCOUNT }} \
-            --region=northamerica-northeast1 \
-            --project=${{ env.PROJECT }} \
-            --execution-environment=gen2 \
-            --max-retries=0 \
-            --task-timeout=300s \
-            --cpu=1000m \
-            --memory=512Mi \
-          2>/dev/null || \
-          gcloud run jobs update namex-solr-heartbeat-${{ env.ENV }} \
-            --image=curlimages/curl \
-            --command=sh \
-            --args="-c,curl -s -o /dev/null -w '%{http_code}' ${{ env.SERVICE_URL }}/internal/solr/update/sync/heartbeat" \
-            --service-account=${{ env.SERVICE_ACCOUNT }} \
-            --region=northamerica-northeast1 \
-            --project=${{ env.PROJECT }}
-
-      - name: Create or update Heartbeat Scheduler Trigger
-        run: |
-          gcloud scheduler jobs create http namex-solr-heartbeat-${{ env.ENV }}-scheduler-trigger \
-            --project=${{ env.PROJECT }} \
-            --location=northamerica-northeast1 \
-            --schedule="0,30 * * * *" \
-            --time-zone="America/Vancouver" \
-            --uri="https://northamerica-northeast1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_NUMBER }}/jobs/namex-solr-heartbeat-${{ env.ENV }}:run" \
-            --message-body='{}' \
-            --http-method=POST \
-            --oauth-service-account-email=${{ env.SERVICE_ACCOUNT }} \
-            --oauth-token-scope=https://www.googleapis.com/auth/cloud-platform \
-          2>/dev/null || \
-          gcloud scheduler jobs update http namex-solr-heartbeat-${{ env.ENV }}-scheduler-trigger \
-            --project=${{ env.PROJECT }} \
-            --location=northamerica-northeast1 \
-            --schedule="0,30 * * * *" \
-            --time-zone="America/Vancouver" \
-            --uri="https://northamerica-northeast1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_NUMBER }}/jobs/namex-solr-heartbeat-${{ env.ENV }}:run" \
-            --message-body='{}' \
-            --http-method=POST \
-            --oauth-service-account-email=${{ env.SERVICE_ACCOUNT }} \
-            --oauth-token-scope=https://www.googleapis.com/auth/cloud-platform
+  namex-solr-heartbeat-cd:
+    uses: bcgov/bcregistry-sre/.github/workflows/backend-job-cd.yaml@main
+    with:
+      target: ${{ inputs.target }}
+      app_name: "namex-solr-heartbeat"
+      working_directory: "./namex-solr-api/jobs/namex-solr-heartbeat"
+      redeploy: ${{ inputs.redeploy }}
+    secrets:
+      WORKLOAD_IDENTIFY_POOLS_PROVIDER: ${{ secrets.WORKLOAD_IDENTIFY_POOLS_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
