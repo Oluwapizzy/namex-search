@@ -1,5 +1,8 @@
 name: NameX Solr Scheduler CD
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
